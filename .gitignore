@@ -8,3 +8,8 @@ dist/
 Thumbs.db
 *.kuzu
 kuzu_data/
+
+# Exported diagrams
+graph-*.mmd
+graph-*.html
+

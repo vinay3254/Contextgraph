@@ -108,6 +108,20 @@ export const GraphLogMessageInputSchema = z.object({
   sessionId: z.string().optional(),
 });
 
+export const GraphRankInputSchema = z.object({
+  sortBy: z.enum(['pageRank', 'hotness', 'degree']).default('pageRank'),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+
+export const GraphHotpathInputSchema = z.object({
+  sourceId: z.string(),
+  targetId: z.string(),
+  method: z.enum(['strongest', 'shortest']).default('strongest'),
+  maxDepth: z.number().int().min(1).max(10).default(6),
+});
+
+export const GraphClusterInputSchema = z.object({});
+
 // ─── Constants ─────────────────────────────────────────────────────────────
 export const WEIGHT_INITIAL = 0.5;
 export const WEIGHT_MAX = 1.0;

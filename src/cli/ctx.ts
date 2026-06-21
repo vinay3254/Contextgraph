@@ -17,6 +17,9 @@ async function getComponents(projectRoot: string) {
   const { FileWatcher } = await import('../watchers/files.js');
   const { GitObserver } = await import('../watchers/git.js');
   const { VizServer } = await import('../viz/server.js');
+  const { GraphAnalytics } = await import('../analytics/pagerank.js');
+  const { Pathfinder } = await import('../graph/pathfinder.js');
+  const { MermaidExporter } = await import('../export/mermaid.js');
 
   const dataDir = process.env['CONTEXTGRAPH_DATA_DIR']
     ?? path.join(projectRoot, '.contextgraph');
@@ -25,7 +28,7 @@ async function getComponents(projectRoot: string) {
   const db = new GraphDB(dataDir);
   await db.init();
 
-  return { db, dataDir, DecayScheduler, ContextBuilder, ObsidianExporter, GraphifyExporter, FileWatcher, GitObserver, VizServer };
+  return { db, dataDir, DecayScheduler, ContextBuilder, ObsidianExporter, GraphifyExporter, FileWatcher, GitObserver, VizServer, GraphAnalytics, Pathfinder, MermaidExporter };
 }
 
 // ─── Chalk (dynamic import for ESM) ────────────────────────────────────────
@@ -275,10 +278,12 @@ program
 // ── ctx export ───────────────────────────────────────────────────────────
 program
   .command('export <format> [outDir]')
-  .description('Export graph (format: obsidian | graphify | json)')
-  .action(async (format: string, outDir?: string) => {
+  .description('Export graph (format: obsidian | graphify | json | mermaid)')
+  .option('--type <type>', 'Mermaid type: flowchart|timeline|class', 'flowchart')
+  .option('--html', 'Wrap Mermaid in HTML with live preview', false)
+  .action(async (format: string, outDir?: string, opts?: { type: string; html: boolean }) => {
     const c = await chalk();
-    const { db, ObsidianExporter, GraphifyExporter } = await getComponents(process.cwd());
+    const { db, ObsidianExporter, GraphifyExporter, MermaidExporter } = await getComponents(process.cwd());
 
     if (format === 'obsidian') {
       const dir = outDir ?? path.join(process.cwd(), 'contextgraph-obsidian');
@@ -293,8 +298,31 @@ program
       const exporter = new GraphifyExporter(db);
       const outPath = await exporter.exportRaw(outDir);
       console.log(c.green(`\n  ✓ Exported raw JSON: ${outPath}\n`));
+    } else if (format === 'mermaid') {
+      const exporter = new MermaidExporter(db);
+      const type = (opts?.type ?? 'flowchart') as 'flowchart' | 'timeline' | 'class';
+      const isHtml = !!opts?.html;
+
+      const fileExt = isHtml ? '.html' : '.mmd';
+      const defaultName = `graph-${type}${fileExt}`;
+      const dest = outDir
+        ? (outDir.endsWith(fileExt) || outDir.endsWith('.html') || outDir.endsWith('.mmd') ? outDir : path.join(outDir, defaultName))
+        : path.join(process.cwd(), defaultName);
+
+      if (isHtml) {
+        await exporter.exportHTMLPreview(dest, type);
+      } else {
+        if (type === 'timeline') {
+          await exporter.exportTimeline(dest);
+        } else if (type === 'class') {
+          await exporter.exportClassDiagram(dest);
+        } else {
+          await exporter.exportFlowchart({ outPath: dest, maxNodes: 50 });
+        }
+      }
+      console.log(c.green(`\n  ✓ Exported Mermaid ${type} (${isHtml ? 'HTML' : 'raw'}): ${dest}\n`));
     } else {
-      console.log(c.red(`\n  Unknown format: ${format}. Use: obsidian | graphify | json\n`));
+      console.log(c.red(`\n  Unknown format: ${format}. Use: obsidian | graphify | json | mermaid\n`));
     }
   });
 
@@ -386,6 +414,103 @@ program
     const result = await scheduler.runDecay();
     await db.persist();
     console.log(c.green(`\n  ✓ Decay: ${result.decayed} edges decayed, ${result.archived} archived\n`));
+  });
+
+// ── ctx health ───────────────────────────────────────────────────────────
+program
+  .command('health')
+  .description('Run a knowledge graph health check')
+  .action(async () => {
+    const c = await chalk();
+    const { db, GraphAnalytics } = await getComponents(process.cwd());
+    const analytics = new GraphAnalytics(db);
+    const report = analytics.computeHealthReport();
+
+    console.log(c.cyan.bold('\n  ⬡  ContextGraph Health Check\n'));
+
+    // Color code health score
+    let scoreColor = c.green;
+    if (report.score < 50) scoreColor = c.red;
+    else if (report.score < 85) scoreColor = c.yellow;
+
+    console.log(`  ${c.bold('Health Score:')} ${scoreColor(report.score)}/100`);
+    console.log(`  ${c.bold('Status:')}       ${report.summary}\n`);
+
+    console.log(`  ${c.bold('Connections:')}`);
+    console.log(`    Average edge weight:  ${report.avgWeight.toFixed(2)}`);
+    console.log(`    Strong edges (>0.6):  ${report.strongEdges}`);
+    console.log(`    Weak edges (<0.2):    ${report.weakEdges}`);
+    console.log(`    Orphaned nodes:       ${report.orphanedNodes.length}`);
+
+    if (report.orphanedNodes.length > 0) {
+      console.log(c.yellow(`\n  ${c.bold('Orphaned Nodes (Disconnected):')}`));
+      for (const id of report.orphanedNodes.slice(0, 10)) {
+        console.log(`    - ${id}`);
+      }
+      if (report.orphanedNodes.length > 10) {
+        console.log(`    ... and ${report.orphanedNodes.length - 10} more`);
+      }
+    }
+
+    if (report.decayRisk.length > 0) {
+      console.log(c.yellow(`\n  ${c.bold('Nodes at Decay Risk (Edges near 0.05 archive threshold):')}`));
+      for (const id of report.decayRisk) {
+        console.log(`    - ${id}`);
+      }
+    }
+
+    console.log(c.cyan(`\n  ${c.bold('Most Connected Nodes (Highest PageRank):')}`));
+    for (const node of report.mostConnected) {
+      console.log(`    ${c.bold(node.pageRank.toFixed(4))}  ${c.dim(node.type.padEnd(8))}  ${node.label}`);
+    }
+
+    if (report.leastConnected.length > 0) {
+      console.log(c.cyan(`\n  ${c.bold('Least Connected Active Nodes (Lowest PageRank):')}`));
+      for (const node of report.leastConnected) {
+        console.log(`    ${c.bold(node.pageRank.toFixed(6))}  ${c.dim(node.type.padEnd(8))}  ${node.label}`);
+      }
+    }
+    console.log();
+  });
+
+// ── ctx timeline ─────────────────────────────────────────────────────────
+program
+  .command('timeline')
+  .description('Show chronological coding session timeline')
+  .action(async () => {
+    const c = await chalk();
+    const { db } = await getComponents(process.cwd());
+
+    const nodes = db.getAllNodes();
+    const sessions = nodes
+      .filter((n) => n.type === 'session')
+      .sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
+
+    console.log(c.cyan.bold('\n  ⬡  ContextGraph Session Timeline\n'));
+
+    if (sessions.length === 0) {
+      console.log(c.yellow('  No sessions recorded yet. Run `ctx watch` to start tracking.\n'));
+      return;
+    }
+
+    for (let i = 0; i < sessions.length; i++) {
+      const session = sessions[i];
+      const dateStr = session.createdAt
+        ? new Date(session.createdAt).toLocaleString()
+        : 'Unknown Time';
+
+      const bullet = i === sessions.length - 1 ? c.green('●') : c.blue('○');
+
+      console.log(`  ${bullet} ${c.bold(session.label)}`);
+      console.log(`    ${c.dim('ID:')}        ${session.id}`);
+      console.log(`    ${c.dim('Started:')}   ${dateStr}`);
+      console.log(`    ${c.dim('Accesses:')}  ${session.accessCount ?? 0}`);
+
+      if (i < sessions.length - 1) {
+        console.log('    |');
+      }
+    }
+    console.log();
   });
 
 program.parse(process.argv);

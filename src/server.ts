@@ -19,6 +19,9 @@ import { ContextBuilder } from './inject/builder.js';
 import { ObsidianExporter } from './export/obsidian.js';
 import { GraphifyExporter } from './export/graphify.js';
 import { NLPExtractor } from './nlp/extractor.js';
+import { GraphAnalytics } from './analytics/pagerank.js';
+import { Pathfinder } from './graph/pathfinder.js';
+import { MermaidExporter } from './export/mermaid.js';
 import {
   GraphWriteInputSchema,
   GraphReadInputSchema,
@@ -26,6 +29,9 @@ import {
   GraphInjectInputSchema,
   GraphExportInputSchema,
   GraphLogMessageInputSchema,
+  GraphRankInputSchema,
+  GraphHotpathInputSchema,
+  GraphClusterInputSchema,
 } from './graph/schema.js';
 
 // ─── Data directory ────────────────────────────────────────────────────────
@@ -45,6 +51,9 @@ const graphifyExporter = new GraphifyExporter(db);
 const nlpExtractor = new NLPExtractor(db);
 const fileWatcher = new FileWatcher(db, PROJECT_ROOT);
 const gitObserver = new GitObserver(db, PROJECT_ROOT);
+const analytics = new GraphAnalytics(db);
+const pathfinder = new Pathfinder(db);
+const mermaidExporter = new MermaidExporter(db);
 
 // ─── Current session ──────────────────────────────────────────────────────
 const sessionId = `session-${new Date().toISOString().split('T')[0]}-${Math.random().toString(36).slice(2, 6)}`;
@@ -163,6 +172,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'graph_stats',
       description: 'Get graph statistics: node count, edge count, archived edges, last decay time.',
+      inputSchema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'graph_rank',
+      description: 'Get nodes ranked by PageRank importance, hotness (recency x activity), or degree centrality.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sortBy: { type: 'string', enum: ['pageRank', 'hotness', 'degree'], default: 'pageRank', description: 'Ranking metric' },
+          limit: { type: 'number', description: 'Max nodes to return (default 20)', default: 20 },
+        },
+      },
+    },
+    {
+      name: 'graph_hotpath',
+      description: 'Find the strongest or shortest path between two nodes, with a human-readable explanation of the hops.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sourceId: { type: 'string', description: 'Source node ID' },
+          targetId: { type: 'string', description: 'Target node ID' },
+          method: { type: 'string', enum: ['strongest', 'shortest'], default: 'strongest', description: 'Path-finding strategy' },
+          maxDepth: { type: 'number', description: 'Max search depth (default 6)', default: 6 },
+        },
+        required: ['sourceId', 'targetId'],
+      },
+    },
+    {
+      name: 'graph_cluster',
+      description: 'Perform community detection on the knowledge graph to find clusters of tightly coupled nodes and their centroids.',
       inputSchema: { type: 'object', properties: {} },
     },
   ],
@@ -327,6 +366,53 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               projectRoot: PROJECT_ROOT,
               dataDir: DATA_DIR,
             }, null, 2),
+          }],
+        };
+      }
+
+      // ── graph_rank ────────────────────────────────────────────────────
+      case 'graph_rank': {
+        const input = GraphRankInputSchema.parse(args);
+        const scores = analytics.computeNodeScores();
+
+        let sorted = scores;
+        if (input.sortBy === 'hotness') {
+          sorted = [...scores].sort((a, b) => b.hotness - a.hotness);
+        } else if (input.sortBy === 'degree') {
+          sorted = [...scores].sort((a, b) => b.degree - a.degree);
+        }
+
+        const sliced = sorted.slice(0, input.limit);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(sliced, null, 2),
+          }],
+        };
+      }
+
+      // ── graph_hotpath ─────────────────────────────────────────────────
+      case 'graph_hotpath': {
+        const input = GraphHotpathInputSchema.parse(args);
+        const result = input.method === 'shortest'
+          ? await pathfinder.shortestPath(input.sourceId, input.targetId, input.maxDepth)
+          : await pathfinder.strongestPath(input.sourceId, input.targetId, input.maxDepth);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          }],
+        };
+      }
+
+      // ── graph_cluster ─────────────────────────────────────────────────
+      case 'graph_cluster': {
+        const _input = GraphClusterInputSchema.parse(args);
+        const clusters = analytics.computeClusters();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(clusters, null, 2),
           }],
         };
       }
