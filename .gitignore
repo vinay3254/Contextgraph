@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.contextgraph/
+*.log
+.env
+.env.local
+.DS_Store
+Thumbs.db
+*.kuzu
+kuzu_data/
