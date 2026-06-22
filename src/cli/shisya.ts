@@ -19,11 +19,13 @@ program
   .option('--no-memory', 'Disable graph memory for this session')
   .option('--ollama-url <url>', 'Ollama base URL (default: http://localhost:11434)')
   .option('--stats', 'Print graph stats and exit')
+  .option('--ui', 'Open the Shisya web UI in your browser (localhost:7332)')
   .addHelpText(
     'after',
     `
 Examples:
   shisya                                    Start interactive REPL
+  shisya --ui                               Open web UI in browser
   shisya "how does the decay system work?"  One-shot answer
   shisya --backend ollama                   Use local Ollama model
   shisya --model claude-sonnet-4-5          Use a specific Claude model
@@ -46,6 +48,7 @@ program.action(
       memory: boolean;
       ollamaUrl?: string;
       stats?: boolean;
+      ui?: boolean;
     }
   ) => {
     const { GraphDB } = await import('../graph/kuzu.js');
@@ -75,6 +78,25 @@ program.action(
       }
       console.log();
       process.exit(0);
+    }
+
+    // --ui: open web UI
+    if (opts.ui) {
+      const { ShisyaUIServer } = await import('../agent/ui-server.js');
+      const { default: open } = await import('open');
+      const ui = new ShisyaUIServer(db, projectRoot, {
+        backend: opts.backend as 'claude' | 'ollama' | undefined,
+        model: opts.model,
+        noMemory: !opts.memory,
+      });
+      const url = await ui.start();
+      console.log(`\n\x1b[36m\x1b[1m  ⬡  Shisya UI\x1b[0m`);
+      console.log(`  \x1b[2mRunning at\x1b[0m \x1b[36m\x1b[1m${url}\x1b[0m`);
+      console.log(`  \x1b[2mPress Ctrl+C to stop\x1b[0m\n`);
+      await open(url);
+      process.on('SIGINT', () => { ui.stop(); process.exit(0); });
+      await new Promise<void>(() => {});
+      return;
     }
 
     const agent = new ContextGraphAgent({
