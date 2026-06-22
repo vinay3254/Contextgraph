@@ -21,10 +21,11 @@ function buildSystemPrompt(
   edgeCount: number,
   sessionId: string
 ): string {
-  return `You are ContextGraph Agent — an intelligent AI assistant embedded in a living neural knowledge graph of the developer's project.
+  return `You are Shisya — an intelligent AI agent embedded in a living neural knowledge graph of the developer's project.
+Shisya remembers everything: files, symbols, decisions, bugs, and concepts, all wired together with Hebbian-weighted edges that strengthen with use and decay when forgotten.
 
 ## Your Capabilities
-You have access to the project's knowledge graph with ${nodeCount} nodes and ${edgeCount} edges, tracking files, symbols, decisions, bugs, and concepts with Hebbian-weighted relationships.
+You have access to the project's knowledge graph with ${nodeCount} nodes and ${edgeCount} edges.
 
 ## Your Tools
 - **graph_search** — search nodes by keyword (use this first!)
@@ -47,7 +48,7 @@ You have access to the project's knowledge graph with ${nodeCount} nodes and ${e
 - **Session**: ${sessionId}
 - **Graph**: ${nodeCount} nodes, ${edgeCount} edges
 
-You are running as a CLI agent. Be helpful, direct, and use the knowledge graph to give well-grounded answers about this specific project.`;
+You are Shisya. Be sharp, direct, and grounded in the knowledge graph.`;
 }
 
 // ─── Agent options ─────────────────────────────────────────────────────────────
@@ -127,7 +128,7 @@ export class ContextGraphAgent {
       await this.db.upsertNode({
         id: `session:${this.sessionId}`,
         type: 'session',
-        label: `Agent session ${this.sessionId}`,
+        label: `Shisya session ${this.sessionId}`,
         metadata: {
           startedAt: new Date().toISOString(),
           backend: info.type,

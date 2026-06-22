@@ -99,8 +99,8 @@ function printHelp(): void {
 
 function printBanner(backendType: BackendType, model: string, nodeCount: number): void {
   console.log();
-  console.log(color(c.cyan + c.bold, '  ⬡  ContextGraph Agent'));
-  console.log(color(c.dim, `  Neural knowledge graph assistant for your dev project`));
+  console.log(color(c.cyan + c.bold, '  ⬡  Shisya'));
+  console.log(color(c.dim, `  Your neural codebase agent — powered by ContextGraph`));
   console.log();
   console.log(`  ${color(c.dim, 'Backend:')}  ${color(c.green, backendType === 'claude' ? '☁  Claude' : '🦙 Ollama')}  ${color(c.dim, model)}`);
   console.log(`  ${color(c.dim, 'Graph:')}    ${color(c.cyan, `${nodeCount} nodes`)} loaded in memory`);

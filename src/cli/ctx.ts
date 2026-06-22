@@ -517,7 +517,7 @@ program
 program
   .command('agent [question]')
   .description(
-    'Talk to the ContextGraph AI agent (interactive REPL or one-shot answer)'
+    'Talk to Shisya — the ContextGraph AI agent (interactive REPL or one-shot answer)'
   )
   .option('--backend <type>', 'Force backend: claude | ollama (auto-detect by default)')
   .option('--model <name>', 'Override model name (e.g. llama3, claude-haiku-4-5)')
