@@ -513,4 +513,90 @@ program
     console.log();
   });
 
+// ── ctx agent ────────────────────────────────────────────────────────────
+program
+  .command('agent [question]')
+  .description(
+    'Talk to the ContextGraph AI agent (interactive REPL or one-shot answer)'
+  )
+  .option('--backend <type>', 'Force backend: claude | ollama (auto-detect by default)')
+  .option('--model <name>', 'Override model name (e.g. llama3, claude-haiku-4-5)')
+  .option('--no-memory', 'Disable graph logging for this session')
+  .option('--ollama-url <url>', 'Ollama base URL (default: http://localhost:11434)')
+  .action(
+    async (
+      question: string | undefined,
+      opts: {
+        backend?: string;
+        model?: string;
+        memory: boolean;
+        ollamaUrl?: string;
+      }
+    ) => {
+      const { GraphDB } = await import('../graph/kuzu.js');
+      const { ContextGraphAgent } = await import('../agent/agent.js');
+
+      const projectRoot = path.resolve(process.cwd());
+      const dataDir =
+        process.env['CONTEXTGRAPH_DATA_DIR'] ??
+        path.join(projectRoot, '.contextgraph');
+      mkdirSync(dataDir, { recursive: true });
+
+      const db = new GraphDB(dataDir);
+      await db.init();
+
+      const agent = new ContextGraphAgent({
+        db,
+        projectRoot,
+        backend: opts.backend as 'claude' | 'ollama' | undefined,
+        model: opts.model,
+        noMemory: !opts.memory,
+        ollamaUrl: opts.ollamaUrl,
+      });
+
+      // Init agent (detect backend)
+      let backendInfo: { backendType: 'claude' | 'ollama'; model: string };
+      try {
+        const info = await agent.init();
+        backendInfo = info;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`\n\x1b[31m  ✗ ${message}\x1b[0m\n`);
+        process.exit(1);
+      }
+
+      // One-shot mode: question provided as argument
+      if (question) {
+        const spinner = setInterval(() => {
+          process.stdout.write('\r\x1b[36m⠋\x1b[0m \x1b[2mThinking…\x1b[0m');
+        }, 80);
+
+        try {
+          const response = await agent.turn(question);
+          clearInterval(spinner);
+          process.stdout.write('\r\x1b[K');
+
+          console.log();
+          console.log(
+            `\x1b[2m[${backendInfo.backendType} · ${backendInfo.model}]\x1b[0m`
+          );
+          console.log();
+          console.log(response);
+          console.log();
+        } catch (err) {
+          clearInterval(spinner);
+          process.stdout.write('\r\x1b[K');
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`\n\x1b[31m  ✗ ${message}\x1b[0m\n`);
+          process.exit(1);
+        }
+        process.exit(0);
+      }
+
+      // Interactive REPL mode
+      const { startRepl } = await import('../agent/repl.js');
+      await startRepl(agent, db);
+    }
+  );
+
 program.parse(process.argv);
